@@ -2,7 +2,7 @@
  * Paper.js - The Swiss Army Knife of Vector Graphics Scripting.
  * http://paperjs.org/
  *
- * Copyright (c) 2011 - 2014, Juerg Lehni & Jonathan Puckey
+ * Copyright (c) 2011 - 2016, Juerg Lehni & Jonathan Puckey
  * http://scratchdisk.com/ & http://jonathanpuckey.com/
  *
  * Distributed under the MIT license. See LICENSE file for details.
@@ -63,7 +63,7 @@ var Numerical = new function() {
         EPSILON = 1e-12,
         MACHINE_EPSILON = 1.12e-16;
 
-    function clip(value, min, max) {
+    function clamp(value, min, max) {
         return value < min ? min : value > max ? max : value;
     }
 
@@ -98,31 +98,31 @@ var Numerical = new function() {
          * cannot be smaller, because errors add up to around 2e-7 in the bezier
          * fat-line clipping code as a result of recursive sub-division.
          */
-        CURVETIME_EPSILON: 4e-7, // NOTE: 2e-7 doesn't work in some edge-cases!
+        CURVETIME_EPSILON: 4e-7, // NOTE: 2e-7 doesn't work in some edge-cases
         /**
          * The epsilon to be used when performing "geometric" checks, such as
          * distances between points and lines.
          */
-        GEOMETRIC_EPSILON: 2e-7,
+        GEOMETRIC_EPSILON: 2e-7, // NOTE: 1e-7 doesn't work in some edge-cases
         /**
          * The epsilon to be used when performing winding contribution checks.
          */
-        WINDING_EPSILON: 2e-7, // NOTE: 1e-7 doesn't work in some edge-cases!
+        WINDING_EPSILON: 2e-7, // NOTE: 1e-7 doesn't work in some edge-cases
         /**
          * The epsilon to be used when performing "trigonometric" checks, such
          * as examining cross products to check for collinearity.
          */
         TRIGONOMETRIC_EPSILON: 1e-7,
         /**
-         * The epsilon to be used in the fat-line clipping code.
+         * The epsilon to be used when comparing curve-time parameters in the
+         * fat-line clipping code.
          */
-        CLIPPING_EPSILON: 1e-7,
+        CLIPPING_EPSILON: 1e-9,
         /**
          * Kappa is the value which which to scale the curve handles when
          * drawing a circle with bezier curves.
          *
-         * http://whizkidtech.redprince.net/bezier/circle/
-         * http://www.whizkidtech.redprince.net/bezier/circle/kappa/
+         * http://whizkidtech.redprince.net/bezier/circle/kappa/
          */
         KAPPA: 4 * (sqrt(2) - 1) / 3,
 
@@ -133,6 +133,16 @@ var Numerical = new function() {
         isZero: function(val) {
             return val >= -EPSILON && val <= EPSILON;
         },
+
+        /**
+         * Returns a number whose value is clamped by the given range.
+         *
+         * @param {Number} value the value to be clamped
+         * @param {Number} min the lower boundary of the range
+         * @param {Number} max the upper boundary of the range
+         * @return {Number} a number in the range of [min, max]
+         */
+        clamp: clamp,
 
         /**
          * Gauss-Legendre Numerical Integration.
@@ -186,7 +196,7 @@ var Numerical = new function() {
 
         /**
          * Solve a quadratic equation in a numerically robust manner;
-         * given a quadratic equation  ax² + bx + c = 0, find the values of x.
+         * given a quadratic equation ax² + bx + c = 0, find the values of x.
          *
          * References:
          *  Kahan W. - "To Solve a Real Cubic Equation"
@@ -199,10 +209,10 @@ var Numerical = new function() {
          * @param {Number[]} roots the array to store the roots in
          * @param {Number} [min] the lower bound of the allowed roots
          * @param {Number} [max] the upper bound of the allowed roots
-         * @return {Number} The number of real roots found, or -1 if there are
+         * @return {Number} the number of real roots found, or -1 if there are
          * infinite solutions
          *
-         * @author Harikrishnan Gopalakrishnan
+         * @author Harikrishnan Gopalakrishnan <hari.exeption@gmail.com>
          */
         solveQuadratic: function(a, b, c, roots, min, max) {
             var count = 0,
@@ -255,10 +265,10 @@ var Numerical = new function() {
             // We need to include EPSILON in the comparisons with min / max,
             // as some solutions are ever so lightly out of bounds.
             if (isFinite(x1) && (min == null || x1 > eMin && x1 < eMax))
-                roots[count++] = min == null ? x1 : clip(x1, min, max);
+                roots[count++] = min == null ? x1 : clamp(x1, min, max);
             if (x2 !== x1
                     && isFinite(x2) && (min == null || x2 > eMin && x2 < eMax))
-                roots[count++] = min == null ? x2 : clip(x2, min, max);
+                roots[count++] = min == null ? x2 : clamp(x2, min, max);
             return count;
         },
 
@@ -289,7 +299,7 @@ var Numerical = new function() {
          * @return {Number} the number of real roots found, or -1 if there are
          * infinite solutions
          *
-         * @author Harikrishnan Gopalakrishnan
+         * @author Harikrishnan Gopalakrishnan <hari.exeption@gmail.com>
          */
         solveCubic: function(a, b, c, d, roots, min, max) {
             var count = 0,
@@ -313,13 +323,13 @@ var Numerical = new function() {
                 // iteration) and solve the quadratic.
                 x = -(b / a) / 3;
                 // Evaluate q, q', b1 and c2 at x
-                tmp = a * x,
-                b1 = tmp + b,
-                c2 = b1 * x + c,
-                qd = (tmp + b1) * x + c2,
+                tmp = a * x;
+                b1 = tmp + b;
+                c2 = b1 * x + c;
+                qd = (tmp + b1) * x + c2;
                 q = c2 * x + d;
                 // Get a good initial approximation.
-                t = q /a;
+                t = q / a;
                 r = pow(abs(t), 1/3);
                 s = t < 0 ? -1 : 1;
                 t = -qd / a;
@@ -330,18 +340,14 @@ var Numerical = new function() {
                     do {
                         x = x0;
                         // Evaluate q, q', b1 and c2 at x
-                        tmp = a * x,
-                        b1 = tmp + b,
-                        c2 = b1 * x + c,
-                        qd = (tmp + b1) * x + c2,
+                        tmp = a * x;
+                        b1 = tmp + b;
+                        c2 = b1 * x + c;
+                        qd = (tmp + b1) * x + c2;
                         q = c2 * x + d;
                         // Newton's. Divide by ec to avoid x0 crossing over a
                         // root.
                         x0 = qd === 0 ? x : x - q / qd / ec;
-                        if (x0 === x) {
-                            x = x0;
-                            break;
-                        }
                     } while (s * x0 > s * x);
                     // Adjust the coefficients for the quadratic.
                     if (abs(a) * x * x > abs(d / x)) {
@@ -354,7 +360,7 @@ var Numerical = new function() {
             var count = Numerical.solveQuadratic(a, b1, c2, roots, min, max);
             if (isFinite(x) && (count === 0 || x !== roots[count - 1])
                     && (min == null || x > min - EPSILON && x < max + EPSILON))
-                roots[count++] = min == null ? x : clip(x, min, max);
+                roots[count++] = min == null ? x : clamp(x, min, max);
             return count;
         }
     };

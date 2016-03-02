@@ -1,9 +1,8 @@
-
 /*
  * Paper.js - The Swiss Army Knife of Vector Graphics Scripting.
  * http://paperjs.org/
  *
- * Copyright (c) 2011 - 2014, Juerg Lehni & Jonathan Puckey
+ * Copyright (c) 2011 - 2016, Juerg Lehni & Jonathan Puckey
  * http://scratchdisk.com/ & http://jonathanpuckey.com/
  *
  * Distributed under the MIT license. See LICENSE file for details.
@@ -241,12 +240,12 @@ var Point = Base.extend(/** @lends Point# */{
 
     /**
      * The length of the vector that is represented by this point's coordinates.
-     * Each point can be interpreted as a vector that points from the origin
-     * ({@code x = 0}, {@code y = 0}) to the point's location.
-     * Setting the length changes the location but keeps the vector's angle.
+     * Each point can be interpreted as a vector that points from the origin (`x
+     * = 0`, `y = 0`) to the point's location. Setting the length changes the
+     * location but keeps the vector's angle.
      *
-     * @type Number
      * @bean
+     * @type Number
      */
     getLength: function() {
         return Math.sqrt(this.x * this.x + this.y * this.y);
@@ -285,8 +284,8 @@ var Point = Base.extend(/** @lends Point# */{
     /**
      * The vector's angle in degrees, measured from the x-axis to the vector.
      *
-     * @name Point#getAngle
      * @bean
+     * @name Point#getAngle
      * @type Number
      */
     getAngle: function(/* point */) {
@@ -312,8 +311,8 @@ var Point = Base.extend(/** @lends Point# */{
     /**
      * The vector's angle in radians, measured from the x-axis to the vector.
      *
-     * @name Point#getAngleInRadians
      * @bean
+     * @name Point#getAngleInRadians
      * @type Number
      */
     getAngleInRadians: function(/* point */) {
@@ -357,13 +356,13 @@ var Point = Base.extend(/** @lends Point# */{
     /**
      * The quadrant of the {@link #angle} of the point.
      *
-     * Angles between 0 and 90 degrees are in quadrant {@code 1}. Angles between
-     * 90 and 180 degrees are in quadrant {@code 2}, angles between 180 and 270
-     * degrees are in quadrant {@code 3} and angles between 270 and 360 degrees
-     * are in quadrant {@code 4}.
+     * Angles between 0 and 90 degrees are in quadrant `1`. Angles between 90
+     * and 180 degrees are in quadrant `2`, angles between 180 and 270 degrees
+     * are in quadrant `3` and angles between 270 and 360 degrees are in
+     * quadrant `4`.
      *
-     * @type Number
      * @bean
+     * @type Number
      *
      * @example
      * var point = new Point({
@@ -423,14 +422,14 @@ var Point = Base.extend(/** @lends Point# */{
     },
 
     /**
-     * Normalize modifies the {@link #length} of the vector to {@code 1} without
-     * changing its angle and returns it as a new point. The optional
-     * {@code length} parameter defines the length to normalize to.
-     * The object itself is not modified!
+     * Normalize modifies the {@link #length} of the vector to `1` without
+     * changing its angle and returns it as a new point. The optional `length`
+     * parameter defines the length to normalize to. The object itself is not
+     * modified!
      *
      * @param {Number} [length=1] The length of the normalized vector
      * @return {Point} the normalized vector of the vector that is represented
-     * by this point's coordinates
+     *     by this point's coordinates
      */
     normalize: function(length) {
         if (length === undefined)
@@ -565,7 +564,8 @@ var Point = Base.extend(/** @lends Point# */{
      * @function
      * @operator
      * @param {Number} number the number to multiply by
-     * @return {Point} the multiplication of the point and the value as a new point
+     * @return {Point} the multiplication of the point and the value as a new
+     *     point
      *
      * @example
      * var point = new Point(10, 20);
@@ -865,6 +865,13 @@ var Point = Base.extend(/** @lends Point# */{
          * var point2 = new Point(200, 5);
          * var minPoint = Point.min(point1, point2);
          * console.log(minPoint); // {x: 10, y: 5}
+         *
+         * @example
+         * // Find the minimum of multiple points:
+         * var point1 = new Point(60, 100);
+         * var point2 = new Point(200, 5);
+         * var point3 = new Point(250, 35);
+         * [point1, point2, point3].reduce(Point.min) // {x: 60, y: 5}
          */
         min: function(/* point1, point2 */) {
             var point1 = Point.read(arguments),
@@ -889,6 +896,13 @@ var Point = Base.extend(/** @lends Point# */{
          * var point2 = new Point(200, 5);
          * var maxPoint = Point.max(point1, point2);
          * console.log(maxPoint); // {x: 200, y: 100}
+         *
+         * @example
+         * // Find the maximum of multiple points:
+         * var point1 = new Point(60, 100);
+         * var point2 = new Point(200, 5);
+         * var point3 = new Point(250, 35);
+         * [point1, point2, point3].reduce(Point.max) // {x: 250, y: 100}
          */
         max: function(/* point1, point2 */) {
             var point1 = Point.read(arguments),
@@ -901,7 +915,7 @@ var Point = Base.extend(/** @lends Point# */{
 
         /**
          * Returns a point object with random {@link #x} and {@link #y} values
-         * between {@code 0} and {@code 1}.
+         * between `0` and `1`.
          *
          * @return {Point} the newly created point object
          * @static
@@ -934,10 +948,10 @@ var Point = Base.extend(/** @lends Point# */{
                         * /*#=*/Numerical.TRIGONOMETRIC_EPSILON;
         }
     }
-}, Base.each(['round', 'ceil', 'floor', 'abs'], function(name) {
+}, Base.each(['round', 'ceil', 'floor', 'abs'], function(key) {
     // Inject round, ceil, floor, abs:
-    var op = Math[name];
-    this[name] = function() {
+    var op = Math[key];
+    this[key] = function() {
         return new Point(op(this.x), op(this.y));
     };
 }, {}));
@@ -948,7 +962,6 @@ var Point = Base.extend(/** @lends Point# */{
  * @class An internal version of Point that notifies its owner of each change
  * through setting itself again on the setter that corresponds to the getter
  * that produced this LinkedPoint.
- * Note: This prototype is not exported.
  *
  * @ignore
  */

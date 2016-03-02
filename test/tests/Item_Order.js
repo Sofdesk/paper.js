@@ -2,13 +2,15 @@
  * Paper.js - The Swiss Army Knife of Vector Graphics Scripting.
  * http://paperjs.org/
  *
- * Copyright (c) 2011 - 2014, Juerg Lehni & Jonathan Puckey
+ * Copyright (c) 2011 - 2016, Juerg Lehni & Jonathan Puckey
  * http://scratchdisk.com/ & http://jonathanpuckey.com/
  *
  * Distributed under the MIT license. See LICENSE file for details.
  *
  * All rights reserved.
  */
+
+QUnit.module('Item Order');
 
 test('Item Order', function() {
     var line = new Path();

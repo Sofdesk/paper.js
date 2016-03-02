@@ -2,7 +2,7 @@
  * Paper.js - The Swiss Army Knife of Vector Graphics Scripting.
  * http://paperjs.org/
  *
- * Copyright (c) 2011 - 2014, Juerg Lehni & Jonathan Puckey
+ * Copyright (c) 2011 - 2016, Juerg Lehni & Jonathan Puckey
  * http://scratchdisk.com/ & http://jonathanpuckey.com/
  *
  * Distributed under the MIT license. See LICENSE file for details.
@@ -68,12 +68,13 @@
  *
  */
 var Style = Base.extend(new function() {
-    // windingRule / resolution / fillOverprint / strokeOverprint are currently
+    // fillRule / resolution / fillOverprint / strokeOverprint are currently
     // not supported.
     var defaults = {
         // Paths
-        fillColor: undefined,
-        strokeColor: undefined,
+        fillColor: null,
+        fillRule: 'nonzero',
+        strokeColor: null,
         strokeWidth: 1,
         strokeCap: 'butt',
         strokeJoin: 'miter',
@@ -81,24 +82,25 @@ var Style = Base.extend(new function() {
         miterLimit: 10,
         dashOffset: 0,
         dashArray: [],
-        windingRule: 'nonzero',
         // Shadows
-        shadowColor: undefined,
+        shadowColor: null,
         shadowBlur: 0,
         shadowOffset: new Point(),
         // Selection
-        selectedColor: undefined,
+        selectedColor: null
+    },
+    // For TextItem, override default fillColor and add text-specific properties
+    textDefaults = Base.set({}, defaults, {
+        fillColor: new Color(), // black
         // Characters
         fontFamily: 'sans-serif',
         fontWeight: 'normal',
         fontSize: 12,
-        font: 'sans-serif', // deprecated, links to fontFamily
         leading: null,
         // Paragraphs
         justification: 'left'
-    };
-
-    var flags = {
+    }),
+    flags = {
         strokeWidth: /*#=*/Change.STROKE,
         strokeCap: /*#=*/Change.STROKE,
         strokeJoin: /*#=*/Change.STROKE,
@@ -111,21 +113,33 @@ var Style = Base.extend(new function() {
         font: /*#=*/Change.GEOMETRY, // deprecated, links to fontFamily
         leading: /*#=*/Change.GEOMETRY,
         justification: /*#=*/Change.GEOMETRY
+    },
+    item = {
+        // Enforce creation of beans, as bean getters have hidden parameters,
+        // see _dontMerge argument below.
+        beans: true
+    },
+    fields = /** @lends Style# */{
+        _class: 'Style',
+
+        initialize: function Style(style, owner, project) {
+            // We keep values in a separate object that we can iterate over.
+            this._values = {};
+            this._owner = owner;
+            this._project = owner && owner._project || project || paper.project;
+            if (owner instanceof TextItem)
+                this._defaults = textDefaults;
+            if (style)
+                this.set(style);
+        },
+
+        _defaults: defaults,
+        beans: true
     };
 
-    // Enforce creation of beans, as bean getters have hidden parameters,
-    // see _dontMerge argument below.
-    var item = { beans: true },
-        fields = {
-            _defaults: defaults,
-            // Override default fillColor for text items
-            _textDefaults: new Base(defaults, {
-                fillColor: new Color() // black
-            }),
-            beans: true
-        };
-
-    Base.each(defaults, function(value, key) {
+    // Iterate over textDefaults to inject getters / setters, to cover all
+    // properties
+    Base.each(textDefaults, function(value, key) {
         var isColor = /Color$/.test(key),
             isPoint = key === 'shadowOffset',
             part = Base.capitalize(key),
@@ -147,10 +161,10 @@ var Style = Base.extend(new function() {
                 children = owner && owner._children;
             // Only unify styles on children of Groups, excluding CompoundPaths.
             if (children && children.length > 0
-                    && !(owner instanceof CompoundPath)) {
+                    && !(owner && owner.skipChildrenStyles)) {
                 for (var i = 0, l = children.length; i < l; i++)
                     children[i]._style[set](value);
-            } else {
+            } else if (key in this._defaults) {
                 var old = this._values[key];
                 if (old !== value) {
                     if (isColor) {
@@ -165,7 +179,7 @@ var Style = Base.extend(new function() {
                             value._owner = owner;
                         }
                     }
-                    // Note: We do not convert the values to Colors in the
+                    // NOTE: We do not convert the values to Colors in the
                     // setter. This only happens once the getter is called.
                     this._values[key] = value;
                     // Notify the owner of the style change STYLE is always set,
@@ -183,8 +197,8 @@ var Style = Base.extend(new function() {
             // If the owner has children, walk through all of them and see if
             // they all have the same style.
             // If true is passed for _dontMerge, don't merge children styles
-            if (!children || children.length === 0 || _dontMerge
-                    || owner instanceof CompoundPath) {
+            if (key in this._defaults && (!children || children.length === 0
+                || _dontMerge || (owner && owner.skipChildrenStyles))) {
                 var value = this._values[key];
                 if (value === undefined) {
                     value = this._defaults[key];
@@ -201,16 +215,16 @@ var Style = Base.extend(new function() {
                             value._owner = owner;
                     }
                 }
-                return value;
-            }
-            for (var i = 0, l = children.length; i < l; i++) {
-                var childValue = children[i]._style[get]();
-                if (i === 0) {
-                    value = childValue;
-                } else if (!Base.equals(value, childValue)) {
-                    // If there is another child with a different
-                    // style, the style is not defined:
-                    return undefined;
+            } else if (children) {
+                for (var i = 0, l = children.length; i < l; i++) {
+                    var childValue = children[i]._style[get]();
+                    if (i === 0) {
+                        value = childValue;
+                    } else if (!Base.equals(value, childValue)) {
+                        // If there is another child with a different
+                        // style, the style is not defined:
+                        return undefined;
+                    }
                 }
             }
             return value;
@@ -227,22 +241,22 @@ var Style = Base.extend(new function() {
         };
     });
 
+    // Create aliases for deprecated properties. The lookup table contains the
+    // part after 'get' / 'set':
+    // TODO: Remove once deprecated long enough, after December 2016.
+    Base.each({
+        Font: 'FontFamily',
+        WindingRule: 'FillRule'
+    }, function(value, key) {
+        var get = 'get' + key,
+            set = 'set' + key;
+        fields[get] = item[get] = '#get' + value;
+        fields[set] = item[set] = '#set' + value;
+    });
+
     Item.inject(item);
     return fields;
 }, /** @lends Style# */{
-    _class: 'Style',
-
-    initialize: function Style(style, _owner, _project) {
-        // We keep values in a separate object that we can iterate over.
-        this._values = {};
-        this._owner = _owner;
-        this._project = _owner && _owner._project || _project || paper.project;
-        if (_owner instanceof TextItem)
-            this._defaults = this._textDefaults;
-        if (style)
-            this.set(style);
-    },
-
     set: function(style) {
         // If the passed style object is also a Style, clone its clonable
         // fields rather than simply copying them.
@@ -269,26 +283,33 @@ var Style = Base.extend(new function() {
 
     // DOCS: Style#hasFill()
     hasFill: function() {
-        return !!this.getFillColor();
+        var color = this.getFillColor();
+        return !!color && color.alpha > 0;
     },
 
     // DOCS: Style#hasStroke()
     hasStroke: function() {
-        return !!this.getStrokeColor() && this.getStrokeWidth() > 0;
+        var color = this.getStrokeColor();
+        return !!color && color.alpha > 0 && this.getStrokeWidth() > 0;
     },
 
     // DOCS: Style#hasShadow()
     hasShadow: function() {
-        return !!this.getShadowColor() && this.getShadowBlur() > 0;
+        var color = this.getShadowColor();
+        // In order to draw a shadow, we need either a shadow blur or an
+        // offset, or both.
+        return !!color && color.alpha > 0 && (this.getShadowBlur() > 0
+                || !this.getShadowOffset().isZero());
     },
 
     /**
      * The view that this style belongs to.
-     * @type View
+     *
      * @bean
+     * @type View
      */
     getView: function() {
-        return this._project.getView();
+        return this._project._view;
     },
 
     // Overrides
@@ -307,9 +328,9 @@ var Style = Base.extend(new function() {
     },
 
     /**
-     * @private
      * @bean
-     * @deprecated use {@link #fontFamily} instead.
+     * @private
+     * @deprecated use {@link #getFontFamily()} instead.
      */
     getFont: '#getFontFamily',
     setFont: '#setFontFamily',
@@ -358,8 +379,8 @@ var Style = Base.extend(new function() {
      *
      * @name Style#strokeWidth
      * @property
-     * @default 1
      * @type Number
+     * @default 1
      *
      * @example {@paperscript}
      * // Setting an item's stroke width:
@@ -381,8 +402,9 @@ var Style = Base.extend(new function() {
      *
      * @name Style#strokeCap
      * @property
+     * @type String
+     * @values 'round', 'square', 'butt'
      * @default 'butt'
-     * @type String('round', 'square', 'butt')
      *
      * @example {@paperscript height=200}
      * // A look at the different stroke caps:
@@ -414,8 +436,9 @@ var Style = Base.extend(new function() {
      *
      * @name Style#strokeJoin
      * @property
+     * @type String
+     * @values 'miter', 'round', 'bevel'
      * @default 'miter'
-     * @type String('miter', 'round', 'bevel')
      *
      * @example {@paperscript height=120}
      * // A look at the different stroke joins:
@@ -445,8 +468,8 @@ var Style = Base.extend(new function() {
      *
      * @name Style#strokeScaling
      * @property
-     * @default true
      * @type Boolean
+     * @default true
      */
 
     /**
@@ -454,8 +477,8 @@ var Style = Base.extend(new function() {
      *
      * @name Style#dashOffset
      * @property
-     * @default 0
      * @type Number
+     * @default 0
      */
 
     /**
@@ -471,8 +494,8 @@ var Style = Base.extend(new function() {
      *
      * @name Style#dashArray
      * @property
-     * @default []
      * @type Array
+     * @default []
      */
 
     /**
@@ -509,6 +532,17 @@ var Style = Base.extend(new function() {
      */
 
     /**
+     * The fill-rule with which the shape gets filled. Please note that only
+     * modern browsers support fill-rules other than `'nonzero'`.
+     *
+     * @name Style#fillRule
+     * @property
+     * @type String
+     * @values 'nonzero', 'evenodd'
+     * @default 'nonzero'
+     */
+
+    /**
      * {@grouptitle Shadow Style}
      *
      * The shadow color.
@@ -537,18 +571,18 @@ var Style = Base.extend(new function() {
      * The shadow's blur radius.
      *
      * @property
-     * @default 0
      * @name Style#shadowBlur
      * @type Number
+     * @default 0
      */
 
     /**
      * The shadow's offset.
      *
      * @property
-     * @default 0
      * @name Style#shadowOffset
      * @type Point
+     * @default 0
      */
 
     /**
@@ -568,8 +602,8 @@ var Style = Base.extend(new function() {
      * The font-family to be used in text content.
      *
      * @name Style#fontFamily
-     * @default 'sans-serif'
      * @type String
+     * @default 'sans-serif'
      */
 
     /**
@@ -577,17 +611,17 @@ var Style = Base.extend(new function() {
      * The font-weight to be used in text content.
      *
      * @name Style#fontWeight
-     * @default 'normal'
      * @type String|Number
+     * @default 'normal'
      */
 
     /**
-     * The font size of text content, as a number in pixels, or as a string
-     * with optional units {@code 'px'}, {@code 'pt'} and {@code 'em'}.
+     * The font size of text content, as a number in pixels, or as a string with
+     * optional units `'px'`, `'pt'` and `'em'`.
      *
      * @name Style#fontSize
-     * @default 10
      * @type Number|String
+     * @default 10
      */
 
     /**
@@ -595,8 +629,8 @@ var Style = Base.extend(new function() {
      * The font-family to be used in text content, as one string.
      *
      * @name Style#font
-     * @default 'sans-serif'
      * @type String
+     * @default 'sans-serif'
      * @deprecated use {@link #fontFamily} instead.
      */
 
@@ -604,8 +638,8 @@ var Style = Base.extend(new function() {
      * The text leading of text content.
      *
      * @name Style#leading
-     * @default fontSize * 1.2
      * @type Number|String
+     * @default fontSize * 1.2
      */
 
     /**
@@ -614,7 +648,8 @@ var Style = Base.extend(new function() {
      * The justification of text paragraphs.
      *
      * @name Style#justification
+     * @type String
+     * @values 'left', 'right', 'center'
      * @default 'left'
-     * @type String('left', 'right', 'center')
      */
 });

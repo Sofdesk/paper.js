@@ -41,7 +41,6 @@
             for (var i = 0; i < 2; i++) {
                 var path = new Path({
                     closed: true,
-                    selected: true,
                     parent: group,
                     fillColor: i == 0 ? 'white' : 'black'
                 });
@@ -123,7 +122,6 @@
                 var image = document.createElement('img');
                 image.onload = function () {
                     handleImage(image);
-                    view.update();
                 };
                 image.src = event.target.result;
             };

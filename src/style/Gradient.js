@@ -2,7 +2,7 @@
  * Paper.js - The Swiss Army Knife of Vector Graphics Scripting.
  * http://paperjs.org/
  *
- * Copyright (c) 2011 - 2014, Juerg Lehni & Jonathan Puckey
+ * Copyright (c) 2011 - 2016, Juerg Lehni & Jonathan Puckey
  * http://scratchdisk.com/ & http://jonathanpuckey.com/
  *
  * Distributed under the MIT license. See LICENSE file for details.
@@ -130,8 +130,8 @@ var Gradient = Base.extend(/** @lends Gradient# */{
     /**
      * The gradient stops on the gradient ramp.
      *
-     * @type GradientStop[]
      * @bean
+     * @type GradientStop[]
      */
     getStops: function() {
         return this._stops;
@@ -161,8 +161,8 @@ var Gradient = Base.extend(/** @lends Gradient# */{
     /**
      * Specifies whether the gradient is radial or linear.
      *
-     * @type Boolean
      * @bean
+     * @type Boolean
      */
     getRadial: function() {
         return this._radial;

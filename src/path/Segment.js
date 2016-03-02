@@ -2,7 +2,7 @@
  * Paper.js - The Swiss Army Knife of Vector Graphics Scripting.
  * http://paperjs.org/
  *
- * Copyright (c) 2011 - 2014, Juerg Lehni & Jonathan Puckey
+ * Copyright (c) 2011 - 2016, Juerg Lehni & Jonathan Puckey
  * http://scratchdisk.com/ & http://jonathanpuckey.com/
  *
  * Distributed under the MIT license. See LICENSE file for details.
@@ -25,6 +25,8 @@
 var Segment = Base.extend(/** @lends Segment# */{
     _class: 'Segment',
     beans: true,
+    // The selection state, a combination of SegmentSelection
+    _selection: 0,
 
     /**
      * Creates a new Segment object.
@@ -32,11 +34,11 @@ var Segment = Base.extend(/** @lends Segment# */{
      * @name Segment#initialize
      * @param {Point} [point={x: 0, y: 0}] the anchor point of the segment
      * @param {Point} [handleIn={x: 0, y: 0}] the handle point relative to the
-     * anchor point of the segment that describes the in tangent of the
-     * segment
+     *     anchor point of the segment that describes the in tangent of the
+     *     segment
      * @param {Point} [handleOut={x: 0, y: 0}] the handle point relative to the
-     * anchor point of the segment that describes the out tangent of the
-     * segment
+     *     anchor point of the segment that describes the out tangent of the
+     *     segment
      *
      * @example {@paperscript}
      * var handleIn = new Point(-80, -100);
@@ -118,8 +120,8 @@ var Segment = Base.extend(/** @lends Segment# */{
         if (count === 0) {
             // Nothing
         } else if (count === 1) {
-            // Note: This copies from existing segments through accessors.
-            if ('point' in arg0) {
+            // NOTE: This copies from existing segments through accessors.
+            if (arg0 && 'point' in arg0) {
                 point = arg0.point;
                 handleIn = arg0.handleIn;
                 handleOut = arg0.handleOut;
@@ -181,8 +183,8 @@ var Segment = Base.extend(/** @lends Segment# */{
     /**
      * The anchor point of the segment.
      *
-     * @type Point
      * @bean
+     * @type Point
      */
     getPoint: function() {
         return this._point;
@@ -199,8 +201,8 @@ var Segment = Base.extend(/** @lends Segment# */{
      * The handle point relative to the anchor point of the segment that
      * describes the in tangent of the segment.
      *
-     * @type Point
      * @bean
+     * @type Point
      */
     getHandleIn: function() {
         return this._handleIn;
@@ -216,8 +218,8 @@ var Segment = Base.extend(/** @lends Segment# */{
      * The handle point relative to the anchor point of the segment that
      * describes the out tangent of the segment.
      *
-     * @type Point
      * @bean
+     * @type Point
      */
     getHandleOut: function() {
         return this._handleOut;
@@ -251,12 +253,20 @@ var Segment = Base.extend(/** @lends Segment# */{
         this._handleOut.set(0, 0);
     },
 
-    _selectionState: 0,
+    _getSelectionFlag: function(point) {
+        return !point ? /*#=*/SegmentSelection.SEGMENT
+                : point === this._point ? /*#=*/SegmentSelection.POINT
+                : point === this._handleIn ? /*#=*/SegmentSelection.HANDLE_IN
+                : point === this._handleOut ? /*#=*/SegmentSelection.HANDLE_OUT
+                : 0;
+    },
 
     /**
      * Specifies whether the {@link #point} of the segment is selected.
-     * @type Boolean
+     *
      * @bean
+     * @type Boolean
+     *
      * @example {@paperscript}
      * var path = new Path.Circle({
      *     center: [80, 50],
@@ -267,38 +277,29 @@ var Segment = Base.extend(/** @lends Segment# */{
      * path.segments[2].selected = true;
      */
     isSelected: function(_point) {
-        var state = this._selectionState;
-        return !_point ? !!(state & /*#=*/SelectionState.SEGMENT)
-            : _point === this._point ? !!(state & /*#=*/SelectionState.POINT)
-            : _point === this._handleIn ? !!(state & /*#=*/SelectionState.HANDLE_IN)
-            : _point === this._handleOut ? !!(state & /*#=*/SelectionState.HANDLE_OUT)
-            : false;
+        return !!(this._selection & this._getSelectionFlag(_point));
     },
 
     setSelected: function(selected, _point) {
         var path = this._path,
             selected = !!selected, // convert to boolean
-            state = this._selectionState,
-            oldState = state,
-            flag = !_point ? /*#=*/SelectionState.SEGMENT
-                    : _point === this._point ? /*#=*/SelectionState.POINT
-                    : _point === this._handleIn ? /*#=*/SelectionState.HANDLE_IN
-                    : _point === this._handleOut ? /*#=*/SelectionState.HANDLE_OUT
-                    : 0;
+            selection = this._selection,
+            oldSelection = selection,
+            flag = this._getSelectionFlag(_point);
         if (selected) {
-            state |= flag;
+            selection |= flag;
         } else {
-            state &= ~flag;
+            selection &= ~flag;
         }
         // Set the selection state even if path is not defined yet, to allow
         // selected segments to be inserted into paths and make JSON
         // deserialization work.
-        this._selectionState = state;
+        this._selection = selection;
         // If the selection state of the segment has changed, we need to let
         // it's path know and possibly add or remove it from
         // project._selectedItems
-        if (path && state !== oldState) {
-            path._updateSelection(this, oldState, state);
+        if (path && selection !== oldSelection) {
+            path._updateSelection(this, oldSelection, selection);
             // Let path know that we changed something and the view should be
             // redrawn
             path._changed(/*#=*/Change.ATTRIBUTE);
@@ -311,8 +312,8 @@ var Segment = Base.extend(/** @lends Segment# */{
      * The index of the segment in the {@link Path#segments} array that the
      * segment belongs to.
      *
-     * @type Number
      * @bean
+     * @type Number
      */
     getIndex: function() {
         return this._index !== undefined ? this._index : null;
@@ -321,8 +322,8 @@ var Segment = Base.extend(/** @lends Segment# */{
     /**
      * The path that the segment belongs to.
      *
-     * @type Path
      * @bean
+     * @type Path
      */
     getPath: function() {
         return this._path || null;
@@ -332,8 +333,8 @@ var Segment = Base.extend(/** @lends Segment# */{
      * The curve that the segment belongs to. For the last segment of an open
      * path, the previous segment is returned.
      *
-     * @type Curve
      * @bean
+     * @type Curve
      */
     getCurve: function() {
         var path = this._path,
@@ -349,10 +350,10 @@ var Segment = Base.extend(/** @lends Segment# */{
     },
 
     /**
-     * The curve location that describes this segment's position ont the path.
+     * The curve location that describes this segment's position on the path.
      *
-     * @type CurveLocation
      * @bean
+     * @type CurveLocation
      */
     getLocation: function() {
         var curve = this.getCurve();
@@ -369,8 +370,8 @@ var Segment = Base.extend(/** @lends Segment# */{
      * belongs to. If the segments belongs to a closed path, the first segment
      * is returned for the last segment of the path.
      *
-     * @type Segment
      * @bean
+     * @type Segment
      */
     getNext: function() {
         var segments = this._path && this._path._segments;
@@ -379,12 +380,112 @@ var Segment = Base.extend(/** @lends Segment# */{
     },
 
     /**
+     * Smooths the bezier curves that pass through this segment by taking into
+     * account the segment's position and distance to the neighboring segments
+     * and changing the direction and length of the segment's handles
+     * accordingly without moving the segment itself.
+     *
+     * Two different smoothing methods are available:
+     *
+     * - `'catmull-rom'` uses the Catmull-Rom spline to smooth the segment.
+     *
+     *     The optionally passed factor controls the knot parametrization of the
+     *     algorithm:
+     *
+     *     - `0.0`: the standard, uniform Catmull-Rom spline
+     *     - `0.5`: the centripetal Catmull-Rom spline, guaranteeing no
+     *         self-intersections
+     *     - `1.0`: the chordal Catmull-Rom spline
+     *
+     * - `'geometric'` use a simple heuristic and empiric geometric method to
+     *     smooth the segment's handles. The handles were weighted, meaning that
+     *     big differences in distances between the segments will lead to
+     *     probably undesired results.
+     *
+     *     The optionally passed factor defines the tension parameter (`0...1`),
+     *     controlling the amount of smoothing as a factor by which to scale
+     *     each handle.
+     *
+     * @option [options.type='catmull-rom'] {String} the type of smoothing
+     *     method: {@values 'catmull-rom', 'geometric'}
+     * @option options.factor {Number} the factor parameterizing the smoothing
+     *     method — default: `0.5` for `'catmull-rom'`, `0.4` for `'geometric'`
+     *
+     * @param {Object} [options] the smoothing options
+     *
+     * @see PathItem#smooth([options])
+     */
+    smooth: function(options, _first, _last) {
+        // _first = _last = false;
+        var opts = options || {},
+            type = opts.type,
+            factor = opts.factor,
+            prev = this.getPrevious(),
+            next = this.getNext(),
+            // Some precalculations valid for both 'catmull-rom' and 'geometric'
+            p0 = (prev || this)._point,
+            p1 = this._point,
+            p2 = (next || this)._point,
+            d1 = p0.getDistance(p1),
+            d2 = p1.getDistance(p2);
+        if (!type || type === 'catmull-rom') {
+            // Implementation of by Catmull-Rom splines with factor parameter
+            // based on work by @nicholaswmin:
+            // https://github.com/nicholaswmin/VectorTests
+            // Using these factors produces different types of splines:
+            // 0.0: the standard, uniform Catmull-Rom spline
+            // 0.5: the centripetal Catmull-Rom spline, guaranteeing no self-
+            //      intersections
+            // 1.0: the chordal Catmull-Rom spline
+            var a = factor === undefined ? 0.5 : factor,
+                d1_a = Math.pow(d1, a),
+                d1_2a = d1_a * d1_a,
+                d2_a = Math.pow(d2, a),
+                d2_2a = d2_a * d2_a;
+            if (!_first && prev) {
+                var A = 2 * d2_2a + 3 * d2_a * d1_a + d1_2a,
+                    N = 3 * d2_a * (d2_a + d1_a);
+                this.setHandleIn(N !== 0
+                    ? new Point(
+                        (d2_2a * p0._x + A * p1._x - d1_2a * p2._x) / N - p1._x,
+                        (d2_2a * p0._y + A * p1._y - d1_2a * p2._y) / N - p1._y)
+                    : new Point());
+            }
+            if (!_last && next) {
+                var A = 2 * d1_2a + 3 * d1_a * d2_a + d2_2a,
+                    N = 3 * d1_a * (d1_a + d2_a);
+                this.setHandleOut(N !== 0
+                    ? new Point(
+                        (d1_2a * p2._x + A * p1._x - d2_2a * p0._x) / N - p1._x,
+                        (d1_2a * p2._y + A * p1._y - d2_2a * p0._y) / N - p1._y)
+                    : new Point());
+            }
+        } else if (type === 'geometric') {
+            // Geometric smoothing approach based on:
+            // http://www.antigrain.com/research/bezier_interpolation/
+            // http://scaledinnovation.com/analytics/splines/aboutSplines.html
+            // http://bseth99.github.io/projects/animate/2-bezier-curves.html
+            if (prev && next) {
+                var vector = p0.subtract(p2),
+                    t = factor === undefined ? 0.4 : factor,
+                    k = t * d1 / (d1 + d2);
+                if (!_first)
+                    this.setHandleIn(vector.multiply(k));
+                if (!_last)
+                    this.setHandleOut(vector.multiply(k - t));
+            }
+        } else {
+            throw new Error('Smoothing method \'' + type + '\' not supported.');
+        }
+    },
+
+    /**
      * The previous segment in the {@link Path#segments} array that the
      * segment belongs to. If the segments belongs to a closed path, the last
      * segment is returned for the first segment of the path.
      *
-     * @type Segment
      * @bean
+     * @type Segment
      */
     getPrevious: function() {
         var segments = this._path && this._path._segments;
@@ -415,7 +516,8 @@ var Segment = Base.extend(/** @lends Segment# */{
 
     /**
      * Reverses the {@link #handleIn} and {@link #handleOut} vectors of this
-     * segment. Note: the actual segment is modified, no copy is created.
+     * segment, modifying the actual segment without creating a copy.
+     *
      * @return {Segment} the reversed segment
      */
     reverse: function() {
@@ -474,6 +576,38 @@ var Segment = Base.extend(/** @lends Segment# */{
      */
     transform: function(matrix) {
         this._transformCoordinates(matrix, new Array(6), true);
+        this._changed();
+    },
+
+    /**
+     * Interpolates between the two specified segments and sets the point and
+     * handles of this segment accordingly.
+     *
+     * @param {Segment} from the segment defining the geometry when `factor` is
+     *     `0`
+     * @param {Segment} to the segment defining the geometry when `factor` is
+     *     `1`
+     * @param {Number} factor the interpolation coefficient, typically between
+     *     `0` and `1`, but extrapolation is possible too
+     */
+    interpolate: function(from, to, factor) {
+        var u = 1 - factor,
+            v = factor,
+            point1 = from._point,
+            point2 = to._point,
+            handleIn1 = from._handleIn,
+            handleIn2 = to._handleIn,
+            handleOut2 = to._handleOut,
+            handleOut1 = from._handleOut;
+        this._point.set(
+                u * point1._x + v * point2._x,
+                u * point1._y + v * point2._y, true);
+        this._handleIn.set(
+                u * handleIn1._x + v * handleIn2._x,
+                u * handleIn1._y + v * handleIn2._y, true);
+        this._handleOut.set(
+                u * handleOut1._x + v * handleOut2._x,
+                u * handleOut1._y + v * handleOut2._y, true);
         this._changed();
     },
 
