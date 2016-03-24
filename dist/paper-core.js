@@ -9,7 +9,7 @@
  *
  * All rights reserved.
  *
- * Date: Fri Feb 26 12:03:05 2016 -0500
+ * Date: Thu Mar 24 15:33:50 2016 -0400
  *
  ***
  *
@@ -1463,6 +1463,18 @@ var LinkedPoint = Point.extend({
 	setY: function(y) {
 		this._y = y;
 		this._owner[this._setter](this);
+	},
+
+	isSelected: function() {
+		return !!(this._owner._selection & this._getSelection());
+	},
+
+	setSelected: function(selected) {
+		this._owner.changeSelection(this._getSelection(), selected);
+	},
+
+	_getSelection: function() {
+		return this._setter === 'setPosition' ? 4 : 0;
 	}
 });
 
@@ -2003,14 +2015,13 @@ new function() {
 			};
 		}, {
 			isSelected: function() {
-				return this._owner._boundsSelected;
+				return !!(this._owner._selection & 2);
 			},
 
 			setSelected: function(selected) {
 				var owner = this._owner;
-				if (owner.setSelected) {
-					owner._boundsSelected = selected;
-					owner.setSelected(selected || owner._segmentSelection > 0);
+				if (owner.changeSelection) {
+					owner.changeSelection(2, selected);
 				}
 			}
 		})
@@ -2569,8 +2580,8 @@ var Project = PaperScopeItem.extend({
 		this._currentStyle = new Style(null, null, this);
 		this._view = View.create(this,
 				element || CanvasProvider.getCanvas(1, 1));
-		this._selectedItems = {};
-		this._selectedItemCount = 0;
+		this._selectionItems = {};
+		this._selectionCount = 0;
 		this._updateVersion = 0;
 	},
 
@@ -2667,15 +2678,15 @@ var Project = PaperScopeItem.extend({
 	getSymbols: 'getSymbolDefinitions',
 
 	getSelectedItems: function() {
-		var selectedItems = this._selectedItems,
+		var selectionItems = this._selectionItems,
 			items = [];
-		for (var id in selectedItems) {
-			var item = selectedItems[id];
-			if (item.isInserted()) {
+		for (var id in selectionItems) {
+			var item = selectionItems[id],
+				selection = item._selection;
+			if (selection & 1 && item.isInserted()) {
 				items.push(item);
-			} else {
-				this._selectedItemCount--;
-				delete selectedItems[id];
+			} else if (!selection) {
+				this._updateSelection(item);
 			}
 		}
 		return items;
@@ -2683,15 +2694,15 @@ var Project = PaperScopeItem.extend({
 
 	_updateSelection: function(item) {
 		var id = item._id,
-			selectedItems = this._selectedItems;
-		if (item._selected) {
-			if (selectedItems[id] !== item) {
-				this._selectedItemCount++;
-				selectedItems[id] = item;
+			selectionItems = this._selectionItems;
+		if (item._selection) {
+			if (selectionItems[id] !== item) {
+				this._selectionCount++;
+				selectionItems[id] = item;
 			}
-		} else if (selectedItems[id] === item) {
-			this._selectedItemCount--;
-			delete selectedItems[id];
+		} else if (selectionItems[id] === item) {
+			this._selectionCount--;
+			delete selectionItems[id];
 		}
 	},
 
@@ -2702,9 +2713,9 @@ var Project = PaperScopeItem.extend({
 	},
 
 	deselectAll: function() {
-		var selectedItems = this._selectedItems;
-		for (var i in selectedItems)
-			selectedItems[i].setFullySelected(false);
+		var selectionItems = this._selectionItems;
+		for (var i in selectionItems)
+			selectionItems[i].setFullySelected(false);
 	},
 
 	addLayer: function(layer) {
@@ -2716,6 +2727,9 @@ var Project = PaperScopeItem.extend({
 			layer._remove(false, true);
 			Base.splice(this._children, [layer], index, 0);
 			layer._setProject(this, true);
+			var name = layer._name;
+			if (name)
+				layer.setName(name);
 			if (this._changes)
 				layer._changed(5);
 			if (!this._activeLayer)
@@ -2788,10 +2802,10 @@ var Project = PaperScopeItem.extend({
 		}
 		ctx.restore();
 
-		if (this._selectedItemCount > 0) {
+		if (this._selectionCount > 0) {
 			ctx.save();
 			ctx.strokeWidth = 1;
-			var items = this._selectedItems,
+			var items = this._selectionItems,
 				size = this._scope.settings.handleSize,
 				version = this._updateVersion;
 			for (var id in items) {
@@ -2819,20 +2833,28 @@ var Item = Base.extend(Emitter, {
 	_applyMatrix: true,
 	_canApplyMatrix: true,
 	_canScaleStroke: false,
-	_boundsSelected: false,
+	_pivot: null,
+	_visible: true,
+	_blendMode: 'normal',
+	_opacity: 1,
+	_locked: false,
+	_guide: false,
+	_clipMask: false,
+	_selection: 0,
+	_selectBounds: true,
 	_selectChildren: false,
 	_serializeFields: {
 		name: null,
 		applyMatrix: null,
 		matrix: new Matrix(),
 		pivot: null,
-		locked: false,
 		visible: true,
 		blendMode: 'normal',
 		opacity: 1,
+		locked: false,
 		guide: false,
-		selected: false,
 		clipMask: false,
+		selected: false,
 		data: {}
 	}
 },
@@ -3002,34 +3024,13 @@ new function() {
 {}), {
 	beans: true,
 
-	_locked: false,
-
-	_visible: true,
-
-	_blendMode: 'normal',
-
-	_opacity: 1,
-
-	_guide: false,
-
-	isSelected: function() {
-		if (this._selectChildren) {
-			var children = this._children;
-			for (var i = 0, l = children.length; i < l; i++)
-				if (children[i].isSelected())
-					return true;
-		}
-		return this._selected;
+	getSelection: function() {
+		return this._selection;
 	},
 
-	setSelected: function(selected, noChildren) {
-		if (!noChildren && this._selectChildren) {
-			var children = this._children;
-			for (var i = 0, l = children.length; i < l; i++)
-				children[i].setSelected(selected);
-		}
-		if ((selected = !!selected) ^ this._selected) {
-			this._selected = selected;
+	setSelection: function(selection) {
+		if (selection !== this._selection) {
+			this._selection = selection;
 			var project = this._project;
 			if (project) {
 				project._updateSelection(this);
@@ -3038,17 +3039,40 @@ new function() {
 		}
 	},
 
-	_selected: false,
+	changeSelection: function(flag, selected) {
+		var selection = this._selection;
+		this.setSelection(selected ? selection | flag : selection & ~flag);
+	},
+
+	isSelected: function() {
+		if (this._selectChildren) {
+			var children = this._children;
+			for (var i = 0, l = children.length; i < l; i++)
+				if (children[i].isSelected())
+					return true;
+		}
+		return !!(this._selection & 1);
+	},
+
+	setSelected: function(selected) {
+		if (this._selectChildren) {
+			var children = this._children;
+			for (var i = 0, l = children.length; i < l; i++)
+				children[i].setSelected(selected);
+		}
+		this.changeSelection(1, selected);
+	},
 
 	isFullySelected: function() {
-		var children = this._children;
-		if (children && this._selected) {
+		var children = this._children,
+			selected = !!(this._selection & 1);
+		if (children && selected) {
 			for (var i = 0, l = children.length; i < l; i++)
 				if (!children[i].isFullySelected())
 					return false;
 			return true;
 		}
-		return this._selected;
+		return selected;
 	},
 
 	setFullySelected: function(selected) {
@@ -3057,7 +3081,7 @@ new function() {
 			for (var i = 0, l = children.length; i < l; i++)
 				children[i].setFullySelected(selected);
 		}
-		this.setSelected(selected, true);
+		this.changeSelection(1, selected);
 	},
 
 	isClipMask: function() {
@@ -3076,8 +3100,6 @@ new function() {
 				this._parent._changed(1024);
 		}
 	},
-
-	_clipMask: false,
 
 	getData: function() {
 		if (!this._data)
@@ -3117,9 +3139,7 @@ new function() {
 	setPivot: function() {
 		this._pivot = Point.read(arguments, 0, { clone: true, readNull: true });
 		this._position = undefined;
-	},
-
-	_pivot: null,
+	}
 }, Base.each({
 		getStrokeBounds: { stroke: true },
 		getHandleBounds: { handle: true },
@@ -3485,7 +3505,7 @@ new function() {
 			this._matrix.initialize(source._matrix);
 		this.setApplyMatrix(source._applyMatrix);
 		this.setPivot(source._pivot);
-		this.setSelected(source._selected);
+		this.setSelection(source._selection);
 		var data = source._data,
 			name = source._name;
 		this._data = data ? Base.clone(data) : null;
@@ -3624,7 +3644,7 @@ new function() {
 		}
 
 		var checkSelf = !(options.guides && !this._guide
-				|| options.selected && !this._selected
+				|| options.selected && !this.isSelected()
 				|| options.type && options.type !== Base.hyphenate(this._class)
 				|| options.class && !(this instanceof options.class)),
 			callback = options.match,
@@ -3833,11 +3853,12 @@ new function() {
 			var project = this._project,
 				notifySelf = project && project._changes;
 			for (var i = 0, l = items.length; i < l; i++) {
-				var item = items[i];
+				var item = items[i],
+					name = item._name;
 				item._parent = this;
 				item._setProject(this._project, true);
-				if (item._name)
-					item.setName(item._name);
+				if (name)
+					item.setName(name);
 				if (notifySelf)
 					this._changed(5);
 			}
@@ -4328,29 +4349,56 @@ new function() {
 		return updated;
 	},
 
-	_drawSelection: function(ctx, matrix, size, selectedItems, updateVersion) {
-		if ((this._drawSelected || this._boundsSelected)
+	_drawSelection: function(ctx, matrix, size, selectionItems, updateVersion) {
+		var selection = this._selection,
+			itemSelected = selection & 1,
+			boundsSelected = selection & 2
+					|| itemSelected && this._selectBounds,
+			positionSelected = selection & 4;
+		if (!this._drawSelected)
+			itemSelected = false;
+		if ((itemSelected || boundsSelected || positionSelected)
 				&& this._isUpdated(updateVersion)) {
 			var layer,
-				color = this.getSelectedColor(true)
-					|| (layer = this.getLayer()) && layer.getSelectedColor(true),
-				mx = matrix.appended(this.getGlobalMatrix(true));
+				color = this.getSelectedColor(true) || (layer = this.getLayer())
+					&& layer.getSelectedColor(true),
+				mx = matrix.appended(this.getGlobalMatrix(true)),
+				half = size / 2;
 			ctx.strokeStyle = ctx.fillStyle = color
 					? color.toCanvasStyle(ctx) : '#009dec';
-			if (this._drawSelected)
-				this._drawSelected(ctx, mx, selectedItems);
-			if (this._boundsSelected) {
-				var half = size / 2,
-					coords = mx._transformCorners(
-							this.getInternalBounds());
+			if (itemSelected)
+				this._drawSelected(ctx, mx, selectionItems);
+			if (positionSelected) {
+				var point = this.getPosition(true),
+					x = point.x,
+					y = point.y;
 				ctx.beginPath();
-				for (var i = 0; i < 8; i++)
+				ctx.arc(x, y, half, 0, Math.PI * 2, true);
+				ctx.stroke();
+				var deltas = [[0, -1], [1, 0], [0, 1], [-1, 0]],
+					start = half,
+					end = size + 1;
+				for (var i = 0; i < 4; i++) {
+					var delta = deltas[i],
+						dx = delta[0],
+						dy = delta[1];
+					ctx.moveTo(x + dx * start, y + dy * start);
+					ctx.lineTo(x + dx * end, y + dy * end);
+					ctx.stroke();
+				}
+			}
+			if (boundsSelected) {
+				var coords = mx._transformCorners(this.getInternalBounds());
+				ctx.beginPath();
+				for (var i = 0; i < 8; i++) {
 					ctx[i === 0 ? 'moveTo' : 'lineTo'](coords[i], coords[++i]);
+				}
 				ctx.closePath();
 				ctx.stroke();
-				for (var i = 0; i < 8; i++)
+				for (var i = 0; i < 8; i++) {
 					ctx.fillRect(coords[i] - half, coords[++i] - half,
 							size, size);
+				}
 			}
 		}
 	},
@@ -4382,6 +4430,7 @@ new function() {
 
 var Group = Item.extend({
 	_class: 'Group',
+	_selectBounds: false,
 	_selectChildren: true,
 	_serializeFields: {
 		children: []
@@ -4490,7 +4539,6 @@ var Shape = Item.extend({
 	_applyMatrix: false,
 	_canApplyMatrix: false,
 	_canScaleStroke: true,
-	_boundsSelected: true,
 	_serializeFields: {
 		type: null,
 		size: null,
@@ -4822,7 +4870,6 @@ var Raster = Item.extend({
 	_applyMatrix: false,
 	_canApplyMatrix: false,
 	_boundsOptions: { stroke: false, handle: false },
-	_boundsSelected: true,
 	_serializeFields: {
 		crossOrigin: null,
 		source: null
@@ -5189,7 +5236,6 @@ var SymbolItem = Item.extend({
 	_applyMatrix: false,
 	_canApplyMatrix: false,
 	_boundsOptions: { stroke: true },
-	_boundsSelected: true,
 	_serializeFields: {
 		symbol: null
 	},
@@ -5343,22 +5389,23 @@ var Segment = Base.extend({
 
 	initialize: function Segment(arg0, arg1, arg2, arg3, arg4, arg5) {
 		var count = arguments.length,
-			point, handleIn, handleOut;
+			point, handleIn, handleOut,
+			selection;
 		if (count === 0) {
 		} else if (count === 1) {
 			if (arg0 && 'point' in arg0) {
 				point = arg0.point;
 				handleIn = arg0.handleIn;
 				handleOut = arg0.handleOut;
+				selection = arg0.selection;
 			} else {
 				point = arg0;
 			}
-		} else if (count === 2 && typeof arg0 === 'number') {
-			point = arguments;
-		} else if (count <= 3) {
+		} else if (typeof arg0 === 'object') {
 			point = arg0;
 			handleIn = arg1;
 			handleOut = arg2;
+			selection = arg3;
 		} else {
 			point = arg0 !== undefined ? [ arg0, arg1 ] : null;
 			handleIn = arg2 !== undefined ? [ arg2, arg3 ] : null;
@@ -5367,13 +5414,19 @@ var Segment = Base.extend({
 		new SegmentPoint(point, this, '_point');
 		new SegmentPoint(handleIn, this, '_handleIn');
 		new SegmentPoint(handleOut, this, '_handleOut');
+		if (selection)
+			this.setSelection(selection);
 	},
 
 	_serialize: function(options) {
-		return Base.serialize(this.hasHandles()
-				? [this._point, this._handleIn, this._handleOut]
-				: this._point,
-				options, true);
+		var point = this._point,
+			selection = this._selection,
+			obj = selection || this.hasHandles()
+					? [point, this._handleIn, this._handleOut]
+					: point;
+		if (selection)
+			obj.push(selection);
+		return Base.serialize(obj, options, true);
 	},
 
 	_changed: function(point) {
@@ -5431,34 +5484,31 @@ var Segment = Base.extend({
 		this._handleOut.set(0, 0);
 	},
 
-	_getSelectionFlag: function(point) {
-		return !point ? 7
-				: point === this._point ? 4
-				: point === this._handleIn ? 1
-				: point === this._handleOut ? 2
-				: 0;
+	getSelection: function() {
+		return this._selection;
 	},
 
-	isSelected: function(_point) {
-		return !!(this._selection & this._getSelectionFlag(_point));
-	},
-
-	setSelected: function(selected, _point) {
-		var path = this._path,
-			selected = !!selected,
-			selection = this._selection,
-			oldSelection = selection,
-			flag = this._getSelectionFlag(_point);
-		if (selected) {
-			selection |= flag;
-		} else {
-			selection &= ~flag;
-		}
-		this._selection = selection;
+	setSelection: function(selection) {
+		var oldSelection = this._selection,
+			path = this._path;
+		this._selection = selection = selection || 0;
 		if (path && selection !== oldSelection) {
 			path._updateSelection(this, oldSelection, selection);
 			path._changed(129);
 		}
+	},
+
+	changeSelection: function(flag, selected) {
+		var selection = this._selection;
+		this.setSelection(selected ? selection | flag : selection & ~flag);
+	},
+
+	isSelected: function() {
+		return !!(this._selection & 7);
+	},
+
+	setSelected: function(selected) {
+		this.changeSelection(7, selected);
 	},
 
 	getIndex: function() {
@@ -5675,7 +5725,8 @@ var Segment = Base.extend({
 
 var SegmentPoint = Point.extend({
 	initialize: function SegmentPoint(point, owner, key) {
-		var x, y, selected;
+		var x, y,
+			selected;
 		if (!point) {
 			x = y = 0;
 		} else if ((x = point[0]) !== undefined) {
@@ -5704,15 +5755,6 @@ var SegmentPoint = Point.extend({
 		return this;
 	},
 
-	_serialize: function(options) {
-		var f = options.formatter,
-			x = f.number(this._x),
-			y = f.number(this._y);
-		return this.isSelected()
-				? { x: x, y: y, selected: true }
-				: [x, y];
-	},
-
 	getX: function() {
 		return this._x;
 	},
@@ -5735,12 +5777,20 @@ var SegmentPoint = Point.extend({
 		return Numerical.isZero(this._x) && Numerical.isZero(this._y);
 	},
 
-	setSelected: function(selected) {
-		this._owner.setSelected(selected, this);
+	isSelected: function() {
+		return !!(this._owner._selection & this._getSelection());
 	},
 
-	isSelected: function() {
-		return this._owner.isSelected(this);
+	setSelected: function(selected) {
+		this._owner.changeSelection(this._getSelection(), selected);
+	},
+
+	_getSelection: function() {
+		var owner = this._owner;
+		return this === owner._point ? 1
+			: this === owner._handleIn ? 2
+			: this === owner._handleOut ? 4
+			: 0;
 	}
 });
 
@@ -6169,12 +6219,9 @@ statics: {
 			c1x = v[2], c1y = v[3],
 			c2x = v[4], c2y = v[5],
 			p2x = v[6], p2y = v[7];
-		return (3.0 * c1y * p1x - 1.5 * c1y * c2x
-			  - 1.5 * c1y * p2x - 3.0 * p1y * c1x
-			  - 1.5 * p1y * c2x - 0.5 * p1y * p2x
-			  + 1.5 * c2y * p1x + 1.5 * c2y * c1x
-			  - 3.0 * c2y * p2x + 0.5 * p2y * p1x
-			  + 1.5 * p2y * c1x + 3.0 * p2y * c2x) / 10;
+		return (6 * (p1x*c1y-p1y*c1x+c2x*p2y-p2x*c2y) +
+				3 * (c1x*p2y-c1y*p2x+p1x*c2y-c2x*p1y+c1x*c2y-c1y*c2x) +
+				1 * (p1x*p2y-p1y*p2x)) / 20;
 	},
 
 	getBounds: function(v) {
@@ -6449,18 +6496,26 @@ new function() {
 
 	return { statics: {
 
-		getLength: function(v, a, b) {
+		getLength: function(v, a, b, ds) {
 			if (a === undefined)
 				a = 0;
 			if (b === undefined)
 				b = 1;
-			if (a === 0 && b === 1 && Curve.isStraight(v)) {
-				var dx = v[6] - v[0],
-					dy = v[7] - v[1];
+			if (Curve.isStraight(v)) {
+				var c = v;
+				if (b < 1) {
+					c = Curve.subdivide(c, b)[0];
+					a /= b;
+				}
+				if (a > 0) {
+					c = Curve.subdivide(c, a)[1];
+				}
+				var dx = c[6] - c[0],
+					dy = c[7] - c[1];
 				return Math.sqrt(dx * dx + dy * dy);
 			}
-			var ds = getLengthIntegrand(v);
-			return Numerical.integrate(ds, a, b, getIterations(a, b));
+			return Numerical.integrate(ds || getLengthIntegrand(v), a, b,
+					getIterations(a, b));
 		},
 
 		getTimeAt: function(v, offset, start) {
@@ -6469,15 +6524,16 @@ new function() {
 			if (offset === 0)
 				return start;
 			var abs = Math.abs,
+				epsilon = 1e-12,
 				forward = offset > 0,
 				a = forward ? start : 0,
 				b = forward ? 1 : start,
 				ds = getLengthIntegrand(v),
-				rangeLength = Numerical.integrate(ds, a, b,
-						getIterations(a, b));
-			if (abs(offset - rangeLength) < 1e-12) {
+				rangeLength = Curve.getLength(v, a, b, ds),
+				diff = abs(offset) - rangeLength;
+			if (abs(diff) < epsilon) {
 				return forward ? b : a;
-			} else if (abs(offset) > rangeLength) {
+			} else if (diff > epsilon) {
 				return null;
 			}
 			var guess = offset / rangeLength,
@@ -7227,6 +7283,7 @@ new function() {
 
 var PathItem = Item.extend({
 	_class: 'PathItem',
+	_selectBounds: false,
 	_canScaleStroke: true,
 
 	initialize: function PathItem() {
@@ -7854,7 +7911,7 @@ var Path = PathItem.extend({
 
 	isFullySelected: function() {
 		var length = this._segments.length;
-		return this._selected && length > 0 && this._segmentSelection
+		return this.isSelected() && length > 0 && this._segmentSelection
 				=== length * 7;
 	},
 
@@ -7864,20 +7921,19 @@ var Path = PathItem.extend({
 		this.setSelected(selected);
 	},
 
-	setSelected: function setSelected(selected) {
-		if (!selected)
+	setSelection: function setSelection(selection) {
+		if (!(selection & 1))
 			this._selectSegments(false);
-		setSelected.base.call(this, selected);
+		setSelection.base.call(this, selection);
 	},
 
 	_selectSegments: function(selected) {
-		var length = this._segments.length;
-		this._segmentSelection = selected
-				? length * 7 : 0;
-		for (var i = 0; i < length; i++) {
-			this._segments[i]._selection = selected
-					? 7 : 0;
-		}
+		var segments = this._segments,
+			length = segments.length,
+			selection = selected ? 7 : 0;
+		this._segmentSelection = selection * length;
+		for (var i = 0; i < length; i++)
+			segments[i]._selection = selection;
 	},
 
 	_updateSelection: function(segment, oldSelection, newSelection) {
@@ -7888,8 +7944,10 @@ var Path = PathItem.extend({
 	},
 
 	splitAt: function(location) {
-		var index = location && location.index,
-			time = location && location.time,
+		var loc = typeof location === 'number'
+				? this.getLocationAt(location) : location,
+			index = loc && loc.index,
+			time = loc && loc.time,
 			tMin = 4e-7,
 			tMax = 1 - tMin;
 		if (time >= tMax) {
@@ -7924,7 +7982,7 @@ var Path = PathItem.extend({
 			location = time === undefined ? index
 				: (curve = this.getCurves()[index])
 					&& curve.getLocationAtTime(time);
-		return location ? this.splitAt(location) : null;
+		return location != null ? this.splitAt(location) : null;
 	},
 
 	join: function(path) {
@@ -8408,12 +8466,12 @@ new function() {
 			var selection = segment._selection,
 				pX = coords[0],
 				pY = coords[1];
-			if (selection & 1)
-				drawHandle(2);
 			if (selection & 2)
+				drawHandle(2);
+			if (selection & 4)
 				drawHandle(4);
 			ctx.fillRect(pX - half, pY - half, size, size);
-			if (!(selection & 4)) {
+			if (!(selection & 1)) {
 				var fillStyle = ctx.fillStyle;
 				ctx.fillStyle = '#ffffff';
 				ctx.fillRect(pX - half + 1, pY - half + 1, size - 2, size - 2);
@@ -9256,12 +9314,12 @@ var CompoundPath = PathItem.extend({
 		}
 	},
 
-	_drawSelected: function(ctx, matrix, selectedItems) {
+	_drawSelected: function(ctx, matrix, selectionItems) {
 		var children = this._children;
 		for (var i = 0, l = children.length; i < l; i++) {
 			var child = children[i],
 				mx = child._matrix;
-			if (!selectedItems[child._id]) {
+			if (!selectionItems[child._id]) {
 				child._drawSelected(ctx, mx.isIdentity() ? matrix
 						: matrix.appended(mx));
 			}
@@ -10316,7 +10374,6 @@ var PathFitter = Base.extend({
 
 var TextItem = Item.extend({
 	_class: 'TextItem',
-	_boundsSelected: true,
 	_applyMatrix: false,
 	_canApplyMatrix: false,
 	_serializeFields: {
@@ -10878,7 +10935,7 @@ var Color = Base.extend(new function() {
 			}
 			for (var i = 0, l = stops.length; i < l; i++) {
 				var stop = stops[i];
-				canvasGradient.addColorStop(stop._rampPoint,
+				canvasGradient.addColorStop(stop._rampPoint || i / (l - 1),
 						stop._color.toCanvasStyle());
 			}
 			return this._canvasStyle = canvasGradient;
@@ -10950,9 +11007,10 @@ var Gradient = Base.extend({
 			stops = radial = null;
 		if (!this._stops)
 			this.setStops(stops || ['white', 'black']);
-		if (this._radial == null)
+		if (this._radial == null) {
 			this.setRadial(typeof radial === 'string' && radial === 'radial'
 					|| radial || false);
+		}
 	},
 
 	_serialize: function(options, dictionary) {
@@ -10963,8 +11021,9 @@ var Gradient = Base.extend({
 	},
 
 	_changed: function() {
-		for (var i = 0, l = this._owners && this._owners.length; i < l; i++)
+		for (var i = 0, l = this._owners && this._owners.length; i < l; i++) {
 			this._owners[i]._changed();
+		}
 	},
 
 	_addOwner: function(color) {
@@ -10984,8 +11043,9 @@ var Gradient = Base.extend({
 
 	clone: function() {
 		var stops = [];
-		for (var i = 0, l = this._stops.length; i < l; i++)
+		for (var i = 0, l = this._stops.length; i < l; i++) {
 			stops[i] = this._stops[i].clone();
+		}
 		return new Gradient(stops, this._radial);
 	},
 
@@ -10994,20 +11054,18 @@ var Gradient = Base.extend({
 	},
 
 	setStops: function(stops) {
-		if (this.stops) {
-			for (var i = 0, l = this._stops.length; i < l; i++)
-				this._stops[i]._owner = undefined;
-		}
-		if (stops.length < 2)
+		if (stops.length < 2) {
 			throw new Error(
 					'Gradient stop list needs to contain at least two stops.');
-		this._stops = GradientStop.readAll(stops, 0, { clone: true });
-		for (var i = 0, l = this._stops.length; i < l; i++) {
-			var stop = this._stops[i];
-			stop._owner = this;
-			if (stop._defaultRamp)
-				stop.setRampPoint(i / (l - 1));
 		}
+		var _stops = this._stops;
+		if (_stops) {
+			for (var i = 0, l = _stops.length; i < l; i++)
+				_stops[i]._owner = undefined;
+		}
+		_stops = this._stops = GradientStop.readAll(stops, 0, { clone: true });
+		for (var i = 0, l = _stops.length; i < l; i++)
+			_stops[i]._owner = this;
 		this._changed();
 	},
 
@@ -11023,13 +11081,17 @@ var Gradient = Base.extend({
 	equals: function(gradient) {
 		if (gradient === this)
 			return true;
-		if (gradient && this._class === gradient._class
-				&& this._stops.length === gradient._stops.length) {
-			for (var i = 0, l = this._stops.length; i < l; i++) {
-				if (!this._stops[i].equals(gradient._stops[i]))
-					return false;
+		if (gradient && this._class === gradient._class) {
+			var stops1 = this._stops,
+				stops2 = gradient._stops,
+				length = stops1.length;
+			if (length === stops2.length) {
+				for (var i = 0; i < length; i++) {
+					if (!stops1[i].equals(stops2[i]))
+						return false;
+				}
+				return true;
 			}
-			return true;
 		}
 		return false;
 	}
@@ -11039,21 +11101,19 @@ var GradientStop = Base.extend({
 	_class: 'GradientStop',
 
 	initialize: function GradientStop(arg0, arg1) {
-		if (arg0) {
-			var color, rampPoint;
-			if (arg1 === undefined && Array.isArray(arg0)) {
+		var color = arg0,
+			rampPoint = arg1;
+		if (typeof arg0 === 'object' && arg1 === undefined) {
+			if (Array.isArray(arg0) && typeof arg0[0] !== 'number') {
 				color = arg0[0];
 				rampPoint = arg0[1];
-			} else if (arg0.color) {
+			} else if ('color' in arg0 || 'rampPoint' in arg0) {
 				color = arg0.color;
 				rampPoint = arg0.rampPoint;
-			} else {
-				color = arg0;
-				rampPoint = arg1;
 			}
-			this.setColor(color);
-			this.setRampPoint(rampPoint);
 		}
+		this.setColor(color);
+		this.setRampPoint(rampPoint);
 	},
 
 	clone: function() {
@@ -11061,8 +11121,10 @@ var GradientStop = Base.extend({
 	},
 
 	_serialize: function(options, dictionary) {
-		return Base.serialize([this._color, this._rampPoint], options, true,
-				dictionary);
+		var color = this._color,
+			rampPoint = this._rampPoint;
+		return Base.serialize(rampPoint == null ? [color] : [color, rampPoint],
+				options, true, dictionary);
 	},
 
 	_changed: function() {
@@ -11075,8 +11137,7 @@ var GradientStop = Base.extend({
 	},
 
 	setRampPoint: function(rampPoint) {
-		this._defaultRamp = rampPoint == null;
-		this._rampPoint = rampPoint || 0;
+		this._rampPoint = rampPoint;
 		this._changed();
 	},
 
@@ -11084,11 +11145,11 @@ var GradientStop = Base.extend({
 		return this._color;
 	},
 
-	setColor: function(color) {
-		this._color = Color.read(arguments);
-		if (this._color === color)
-			this._color = color.clone();
-		this._color._owner = this;
+	setColor: function() {
+		var color = Color.read(arguments, 0, { clone: true });
+		if (color)
+			color._owner = this;
+		this._color = color;
 		this._changed();
 	},
 
@@ -11101,7 +11162,7 @@ var GradientStop = Base.extend({
 });
 
 var Style = Base.extend(new function() {
-	var defaults = {
+	var itemDefaults = {
 		fillColor: null,
 		fillRule: 'nonzero',
 		strokeColor: null,
@@ -11117,13 +11178,15 @@ var Style = Base.extend(new function() {
 		shadowOffset: new Point(),
 		selectedColor: null
 	},
-	textDefaults = Base.set({}, defaults, {
-		fillColor: new Color(),
+	groupDefaults = Base.set({}, itemDefaults, {
 		fontFamily: 'sans-serif',
 		fontWeight: 'normal',
 		fontSize: 12,
 		leading: null,
 		justification: 'left'
+	}),
+	textDefaults = Base.set({}, groupDefaults, {
+		fillColor: new Color()
 	}),
 	flags = {
 		strokeWidth: 97,
@@ -11143,22 +11206,21 @@ var Style = Base.extend(new function() {
 	},
 	fields = {
 		_class: 'Style',
+		beans: true,
 
 		initialize: function Style(style, owner, project) {
 			this._values = {};
 			this._owner = owner;
 			this._project = owner && owner._project || project || paper.project;
-			if (owner instanceof TextItem)
-				this._defaults = textDefaults;
+			this._defaults = !owner || owner instanceof Group ? groupDefaults
+					: owner instanceof TextItem ? textDefaults
+					: itemDefaults;
 			if (style)
 				this.set(style);
-		},
-
-		_defaults: defaults,
-		beans: true
+		}
 	};
 
-	Base.each(textDefaults, function(value, key) {
+	Base.each(groupDefaults, function(value, key) {
 		var isColor = /Color$/.test(key),
 			isPoint = key === 'shadowOffset',
 			part = Base.capitalize(key),
@@ -12676,12 +12738,11 @@ var Tool = PaperScopeItem.extend({
 
 var Http = {
 	request: function(options) {
-		var ctor = window.ActiveXObject || window.XMLHttpRequest,
-			xhr = new ctor('Microsoft.XMLHTTP');
+		var xhr = new window.XMLHttpRequest();
 		xhr.open((options.method || 'get').toUpperCase(), options.url,
 				Base.pick(options.async, true));
-		if ('overrideMimeType' in xhr)
-			xhr.overrideMimeType('text/plain');
+		if (options.mimeType)
+			xhr.overrideMimeType(options.mimeType);
 		xhr.onload = function() {
 			var status = xhr.status;
 			if (status === 0 || status === 200) {
@@ -13012,8 +13073,8 @@ var SvgElement = new function() {
 		attributeNamespace = {
 			href: xlink,
 			xlink: xmlns,
-			xmlns: xmlns,
-			'xmlns:xlink': xmlns
+			xmlns: xmlns + '/',
+			'xmlns:xlink': xmlns + '/'
 		};
 
 	function create(tag, attributes, formatter) {
@@ -13035,7 +13096,7 @@ var SvgElement = new function() {
 			if (typeof value === 'number' && formatter)
 				value = formatter.number(value);
 			if (namespace) {
-				node.setAttributeNS(namespace + '/', name, value);
+				node.setAttributeNS(namespace, name, value);
 			} else {
 				node.setAttribute(name, value);
 			}
@@ -13301,12 +13362,14 @@ new function() {
 			var stops = gradient._stops;
 			for (var i = 0, l = stops.length; i < l; i++) {
 				var stop = stops[i],
+					offset = stop._rampPoint,
 					stopColor = stop._color,
 					alpha = stopColor.getAlpha();
-				attrs = {
-					offset: stop._rampPoint,
-					'stop-color': stopColor.toCSS(true)
-				};
+				attrs = {};
+				if (offset != null)
+					attrs.offset = offset;
+				if (stopColor)
+					attrs['stop-color'] = stopColor.toCSS(true);
 				if (alpha < 1)
 					attrs['stop-opacity'] = alpha;
 				gradientNode.appendChild(
@@ -13550,7 +13613,7 @@ new function() {
 			var childNode = nodes[i],
 				child;
 			if (childNode.nodeType === 1
-					&& childNode.nodeName.toLowerCase() !== 'defs'
+					&& !/^defs$/i.test(childNode.nodeName)
 					&& (child = importNode(childNode, options, false))
 					&& !(child instanceof SymbolDefinition))
 				children.push(child);
@@ -13705,63 +13768,68 @@ new function() {
 	};
 
 	function applyTransform(item, value, name, node) {
-		var transforms = (node.getAttribute(name) || '').split(/\)\s*/g),
-			matrix = new Matrix();
-		for (var i = 0, l = transforms.length; i < l; i++) {
-			var transform = transforms[i];
-			if (!transform)
-				break;
-			var parts = transform.split(/\(\s*/),
-				command = parts[0],
-				v = parts[1].split(/[\s,]+/g);
-			for (var j = 0, m = v.length; j < m; j++)
-				v[j] = parseFloat(v[j]);
-			switch (command) {
-			case 'matrix':
-				matrix.append(new Matrix(v[0], v[1], v[2], v[3], v[4], v[5]));
-				break;
-			case 'rotate':
-				matrix.rotate(v[0], v[1], v[2]);
-				break;
-			case 'translate':
-				matrix.translate(v[0], v[1]);
-				break;
-			case 'scale':
-				matrix.scale(v);
-				break;
-			case 'skewX':
-				matrix.skew(v[0], 0);
-				break;
-			case 'skewY':
-				matrix.skew(0, v[0]);
-				break;
+		if (item.transform) {
+			var transforms = (node.getAttribute(name) || '').split(/\)\s*/g),
+				matrix = new Matrix();
+			for (var i = 0, l = transforms.length; i < l; i++) {
+				var transform = transforms[i];
+				if (!transform)
+					break;
+				var parts = transform.split(/\(\s*/),
+					command = parts[0],
+					v = parts[1].split(/[\s,]+/g);
+				for (var j = 0, m = v.length; j < m; j++)
+					v[j] = parseFloat(v[j]);
+				switch (command) {
+				case 'matrix':
+					matrix.append(
+							new Matrix(v[0], v[1], v[2], v[3], v[4], v[5]));
+					break;
+				case 'rotate':
+					matrix.rotate(v[0], v[1], v[2]);
+					break;
+				case 'translate':
+					matrix.translate(v[0], v[1]);
+					break;
+				case 'scale':
+					matrix.scale(v);
+					break;
+				case 'skewX':
+					matrix.skew(v[0], 0);
+					break;
+				case 'skewY':
+					matrix.skew(0, v[0]);
+					break;
+				}
 			}
+			item.transform(matrix);
 		}
-		item.transform(matrix);
 	}
 
 	function applyOpacity(item, value, name) {
-		var color = item[name === 'fill-opacity' ? 'getFillColor'
-				: 'getStrokeColor']();
+		var key = name === 'fill-opacity' ? 'getFillColor' : 'getStrokeColor',
+			color = item[key] && item[key]();
 		if (color)
 			color.setAlpha(parseFloat(value));
 	}
 
 	var attributes = Base.set(Base.each(SvgStyles, function(entry) {
 		this[entry.attribute] = function(item, value) {
-			item[entry.set](convertValue(value, entry.type, entry.fromSVG));
-			if (entry.type === 'color') {
-				var color = item[entry.get]();
-				if (color) {
-					if (color._scaleToBounds) {
-						var bounds = item.getBounds();
-						color.transform(new Matrix()
-							.translate(bounds.getPoint())
-							.scale(bounds.getSize()));
-					}
-					if (item instanceof Shape) {
-						color.transform(new Matrix()
-								.translate(item.getPosition(true).negate()));
+			if (item[entry.set]) {
+				item[entry.set](convertValue(value, entry.type, entry.fromSVG));
+				if (entry.type === 'color') {
+					var color = item[entry.get]();
+					if (color) {
+						if (color._scaleToBounds) {
+							var bounds = item.getBounds();
+							color.transform(new Matrix()
+								.translate(bounds.getPoint())
+								.scale(bounds.getSize()));
+						}
+						if (item instanceof Shape) {
+							color.transform(new Matrix().translate(
+								item.getPosition(true).negate()));
+						}
 					}
 				}
 			}
@@ -13793,11 +13861,13 @@ new function() {
 		'stroke-opacity': applyOpacity,
 
 		visibility: function(item, value) {
-			item.setVisible(value === 'visible');
+			if (item.setVisible)
+				item.setVisible(value === 'visible');
 		},
 
 		display: function(item, value) {
-			item.setVisible(value !== null);
+			if (item.setVisible)
+				item.setVisible(value !== null);
 		},
 
 		'stop-color': function(item, value) {
@@ -13811,9 +13881,11 @@ new function() {
 		},
 
 		offset: function(item, value) {
-			var percentage = value.match(/(.*)%$/);
-			item.setRampPoint(percentage ? percentage[1] / 100
-					: parseFloat(value));
+			if (item.setRampPoint) {
+				var percentage = value.match(/(.*)%$/);
+				item.setRampPoint(percentage ? percentage[1] / 100
+						: parseFloat(value));
+			}
 		},
 
 		viewBox: function(item, value, name, node, styles) {
@@ -13823,21 +13895,23 @@ new function() {
 				matrix;
 			if (item instanceof Group) {
 				var scale = size ? size.divide(rect.getSize()) : 1,
-				matrix = new Matrix().scale(scale).translate(rect.getPoint().negate());
+				matrix = new Matrix().scale(scale)
+						.translate(rect.getPoint().negate());
 				group = item;
 			} else if (item instanceof SymbolDefinition) {
 				if (size)
 					rect.setSize(size);
 				group = item._item;
 			}
-			var clip = getAttribute(node, 'overflow', styles) != 'visible';
-			if (clip && !rect.contains(group.getBounds())) {
-				clip = new Shape.Rectangle(rect).transform(group._matrix);
-				clip.setClipMask(true);
-				group.addChild(clip);
+			if (group)  {
+				if (getAttribute(node, 'overflow', styles) !== 'visible') {
+					var clip = new Shape.Rectangle(rect);
+					clip.setClipMask(true);
+					group.addChild(clip);
+				}
+				if (matrix)
+					group.transform(matrix);
 			}
-			if (matrix)
-				group.transform(matrix);
 		}
 	});
 
@@ -13856,14 +13930,16 @@ new function() {
 	}
 
 	function applyAttributes(item, node, isRoot) {
-		var styles = {
-			node: DomElement.getStyles(node) || {},
-			parent: !isRoot && DomElement.getStyles(node.parentNode) || {}
-		};
+		var parent = node.parentNode,
+			styles = {
+				node: DomElement.getStyles(node) || {},
+				parent: !isRoot && !/^defs$/i.test(parent.tagName)
+						&& DomElement.getStyles(parent) || {}
+			};
 		Base.each(attributes, function(apply, name) {
 			var value = getAttribute(node, name, styles);
-			if (value !== undefined)
-				item = Base.pick(apply(item, value, name, node, styles), item);
+			item = value !== undefined && apply(item, value, name, node, styles)
+					|| item;
 		});
 		return item;
 	}
@@ -13871,7 +13947,8 @@ new function() {
 	var definitions = {};
 	function getDefinition(value) {
 		var match = value && value.match(/\((?:["'#]*)([^"')]+)/),
-			res = match && definitions[match[1]];
+			res = match && definitions[match[1]
+				.replace(window.location.href.split('#')[0] + '#', '')];
 		if (res && res._scaleToBounds) {
 			res = res.clone();
 			res._scaleToBounds = true;
@@ -13982,7 +14059,8 @@ new function() {
 				onLoad(node);
 			} else {
 				Http.request({
-					url: source, async: true,
+					url: source,
+					async: true,
 					onLoad: onLoad,
 					onError: onError
 				});
