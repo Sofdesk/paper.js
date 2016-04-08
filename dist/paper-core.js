@@ -9,7 +9,7 @@
  *
  * All rights reserved.
  *
- * Date: Fri Apr 8 16:20:00 2016 -0400
+ * Date: Fri Apr 8 16:23:28 2016 -0400
  *
  ***
  *
@@ -3851,12 +3851,12 @@ new function() {
 			}
 			Base.splice(children, items, index, 0);
 			var project = this._project,
-				notifySelf = project && project._changes;
+				notifySelf = project._changes;
 			for (var i = 0, l = items.length; i < l; i++) {
 				var item = items[i],
 					name = item._name;
 				item._parent = this;
-				item._setProject(this._project, true);
+				item._setProject(project, true);
 				if (name)
 					item.setName(name);
 				if (notifySelf)
@@ -4878,10 +4878,12 @@ var Raster = Item.extend({
 	initialize: function Raster(object, position) {
 		if (!this._initialize(object,
 				position !== undefined && Point.read(arguments, 1))) {
-			if (typeof object === 'string') {
-				this.setSource(object);
+			var image = typeof object === 'string'
+					? document.getElementById(object) : object;
+			if (image) {
+				this.setImage(image);
 			} else {
-				this.setImage(object);
+				this.setSource(object);
 			}
 		}
 		if (!this._size) {
@@ -5049,23 +5051,24 @@ var Raster = Item.extend({
 	},
 
 	setSource: function(src) {
-		var crossOrigin = this._crossOrigin,
-			image = document.getElementById(src) || new window.Image();
+		var image = new window.Image(),
+			crossOrigin = this._crossOrigin;
 		if (crossOrigin)
 			image.crossOrigin = crossOrigin;
-		if (!image.src)
-			image.src = src;
+		image.src = src;
 		this.setImage(image);
 	},
 
 	getCrossOrigin: function() {
-		return this._image && this._image.crossOrigin || this._crossOrigin || '';
+		var image = this._image;
+		return image && image.crossOrigin || this._crossOrigin || '';
 	},
 
 	setCrossOrigin: function(crossOrigin) {
 		this._crossOrigin = crossOrigin;
-		if (this._image)
-			this._image.crossOrigin = crossOrigin;
+		var image = this._image;
+		if (image)
+			image.crossOrigin = crossOrigin;
 	},
 
 	getElement: function() {
@@ -6038,6 +6041,7 @@ var Curve = Base.extend({
 				res = this.getNext();
 			} else {
 				this._segment2 = segment;
+				this._changed();
 				res = new Curve(segment, segment2);
 			}
 		}
@@ -6219,9 +6223,9 @@ statics: {
 			c1x = v[2], c1y = v[3],
 			c2x = v[4], c2y = v[5],
 			p2x = v[6], p2y = v[7];
-		return (6 * (p1x*c1y-p1y*c1x+c2x*p2y-p2x*c2y) +
-				3 * (c1x*p2y-c1y*p2x+p1x*c2y-c2x*p1y+c1x*c2y-c1y*c2x) +
-				1 * (p1x*p2y-p1y*p2x)) / 20;
+		return 3 * ((p2y - p1y) * (c1x + c2x) - (p2x - p1x) * (c1y + c2y)
+				+ c1y * (p1x - c2x) - c1x * (p1y - c2y)
+				+ p2y * (c2x + p1x / 3) - p2x * (c2y + p1y / 3)) / 20;
 	},
 
 	getBounds: function(v) {
@@ -8870,7 +8874,7 @@ statics: {
 	},
 
 	getStrokeBounds: function(segments, closed, path, matrix, options) {
-		var style = path._style,
+		var style = path.getStyle(),
 			stroke = style.hasStroke(),
 			strokeWidth = style.getStrokeWidth(),
 			strokeMatrix = stroke && path._getStrokeMatrix(matrix, options),
@@ -8994,7 +8998,7 @@ statics: {
 	},
 
 	getHandleBounds: function(segments, closed, path, matrix, options) {
-		var style = path._style,
+		var style = path.getStyle(),
 			stroke = options.stroke && style.hasStroke(),
 			strokePadding,
 			joinPadding;
@@ -12687,7 +12691,7 @@ var Tool = PaperScopeItem.extend({
 			tool = this;
 		function update(minDistance, maxDistance) {
 			var pt = point,
-				toolPoint = move ? tool._point : tool._downPoint || pt;
+				toolPoint = (move ? tool._point : tool._downPoint) || pt;
 			if (move) {
 				if (tool._moveCount && pt.equals(toolPoint)) {
 					return false;
@@ -13362,12 +13366,11 @@ new function() {
 			var stops = gradient._stops;
 			for (var i = 0, l = stops.length; i < l; i++) {
 				var stop = stops[i],
-					offset = stop._rampPoint,
 					stopColor = stop._color,
 					alpha = stopColor.getAlpha();
-				attrs = {};
-				if (offset != null)
-					attrs.offset = offset;
+				attrs = {
+					offset: stop._rampPoint || i / (l - 1)
+				};
 				if (stopColor)
 					attrs['stop-color'] = stopColor.toCSS(true);
 				if (alpha < 1)
