@@ -9,7 +9,7 @@
  *
  * All rights reserved.
  *
- * Date: Fri Apr 8 16:23:28 2016 -0400
+ * Date: Fri Apr 8 16:25:27 2016 -0400
  *
  ***
  *
@@ -3843,10 +3843,7 @@ new function() {
 				if (_proto && !(item instanceof _proto)) {
 					items.splice(i, 1);
 				} else {
-					var owner = item._getOwner(),
-						shift = owner === this && item._index < index;
-					if (owner && item._remove(false, true) && shift)
-						index--;
+					item._remove(false, true);
 				}
 			}
 			Base.splice(children, items, index, 0);
@@ -3871,15 +3868,26 @@ new function() {
 
 	_insertItem: '#insertChild',
 
+	_insertAt: function(item, offset, _preserve) {
+		var res = this;
+		if (res !== item) {
+			var owner = item && item._getOwner();
+			if (owner) {
+				res._remove(false, true);
+				owner._insertItem(item._index + offset, res, _preserve);
+			} else {
+				res = null;
+			}
+		}
+		return res;
+	},
+
 	insertAbove: function(item, _preserve) {
-		var owner = item && item._getOwner();
-		return owner ? owner._insertItem(item._index + 1, this, _preserve)
-				: null;
+		return this._insertAt(item, 1, _preserve);
 	},
 
 	insertBelow: function(item, _preserve) {
-		var owner = item && item._getOwner();
-		return owner ? owner._insertItem(item._index, this, _preserve) : null;
+		return this._insertAt(item, 0, _preserve);
 	},
 
 	sendToBack: function() {
@@ -12691,12 +12699,12 @@ var Tool = PaperScopeItem.extend({
 			tool = this;
 		function update(minDistance, maxDistance) {
 			var pt = point,
-				toolPoint = (move ? tool._point : tool._downPoint) || pt;
+				toolPoint = move ? tool._point : (tool._downPoint || pt);
 			if (move) {
 				if (tool._moveCount && pt.equals(toolPoint)) {
 					return false;
 				}
-				if (minDistance != null || maxDistance != null) {
+				if (toolPoint && (minDistance != null || maxDistance != null)) {
 					var vector = pt.subtract(toolPoint),
 						distance = vector.getLength();
 					if (distance < (minDistance || 0))
@@ -12709,7 +12717,7 @@ var Tool = PaperScopeItem.extend({
 				tool._moveCount++;
 			}
 			tool._point = pt;
-			tool._lastPoint = toolPoint;
+			tool._lastPoint = toolPoint || pt;
 			if (mouse.down) {
 				tool._moveCount = -1;
 				tool._downPoint = pt;
