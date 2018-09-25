@@ -76,6 +76,7 @@ PathItem.inject(new function() {
     }
 
     function computeBoolean(path1, path2, operation) {
+        console.log("computeBoolean", path1, path2, operation)
         // Retrieve the operator lookup table for winding numbers.
         var operator = operators[operation];
         // Add a simple boolean property to check for a given operation,
