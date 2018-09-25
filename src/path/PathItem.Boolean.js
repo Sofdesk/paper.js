@@ -78,6 +78,7 @@ PathItem.inject(new function() {
     // for each curve in the graph after curves in the operands are
     // split at intersections.
     function computeBoolean(path1, path2, operation) {
+        console.log("computeBoolean", path1, path2, operation)
         // If path1 is open, delegate to computeOpenBoolean()
         if (!path1._children && !path1._closed)
             return computeOpenBoolean(path1, path2, operation);
